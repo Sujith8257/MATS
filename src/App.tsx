@@ -10,6 +10,13 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } 
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import {
+  uploadAPK,
+  startAnalysis as startAnalysisAPI,
+  getAnalysisStatus,
+  checkHealth,
+  type AnalysisStatus as AnalysisStatusType,
+} from '@/lib/api'
 
 type WorkflowStep = 'idle' | 'processing' | 'summary'
 type AnalysisOption = {
@@ -21,124 +28,187 @@ type AnalysisOption = {
 
 const analysisOptions: AnalysisOption[] = [
   {
-    id: 'mobsf',
-    name: 'MobSF',
-    description: 'Comprehensive static + dynamic security analysis designed for APKs.',
-    highlight: 'Required',
+    id: 'jadx',
+    name: 'JADX',
+    description: 'Decompile APK to Java/Kotlin source code for static analysis.',
+    highlight: 'Recommended',
   },
   {
-    id: 'mitmproxy',
-    name: 'MITMProxy',
-    description: 'Inspect network traffic to discover unsafe communication patterns.',
+    id: 'apktool',
+    name: 'APKTool',
+    description: 'Decode APK resources, manifest, and Smali code structure.',
+  },
+  {
+    id: 'quark',
+    name: 'Quark Engine',
+    description: 'Malware detection and threat scoring based on behavior patterns.',
   },
   {
     id: 'androguard',
     name: 'AndroGuard',
-    description: 'Deep dive into bytecode, certificates, and manifest hygiene.',
+    description: 'Deep bytecode analysis, certificate validation, and manifest inspection.',
   },
   {
     id: 'frida',
     name: 'Frida',
-    description: 'Runtime instrumentation & hook-based inspection for dynamic behavior.',
+    description: 'Runtime instrumentation & hook-based inspection (requires device).',
   },
   {
-    id: 'drozer',
-    name: 'Drozer',
-    description: 'Advanced exploitation probes for research-grade assessments.',
+    id: 'mitmproxy',
+    name: 'MITMProxy',
+    description: 'Network traffic analysis and communication pattern discovery.',
   },
 ] as const
 
-const recentAnalyses = [
-  { name: 'retail-banking.apk', date: '2025-10-21', status: 'Completed', severity: 'Medium' },
-  { name: 'social_network.apk', date: '2025-10-18', status: 'Completed', severity: 'Low' },
-  { name: 'global-delivery.apk', date: '2025-10-16', status: 'Failed', severity: '—' },
-]
-
-const summaryTemplate = {
-  generatedAt: 'October 21, 2025 · 10:45 AM',
-  keyFindings: [
-    'Improper thread synchronization identified in the payment service.',
-    'Sensitive analytics payload exposed via unsecured WebSocket.',
-    'Excessive permissions in manifest allow privilege escalation.',
-  ],
-  vulnerabilities: [
-    {
-      category: 'Race Condition',
-      name: 'Inconsistent balance checks in payment module',
-      severity: 'critical',
-      scanner: 'MobSF',
-    },
-    {
-      category: 'Improper Thread Synchronization',
-      name: 'Analytics service spawns unbounded worker threads',
-      severity: 'high',
-      scanner: 'Frida',
-    },
-    {
-      category: 'Runtime Exploit Surface',
-      name: 'Broadcast receiver exported without auth',
-      severity: 'medium',
-      scanner: 'Drozer',
-    },
-  ],
-  remediation: [
-    {
-      title: 'Race Condition Mitigation',
-      action: 'Introduce optimistic locking combined with server-side verification before commits.',
-    },
-    {
-      title: 'Secure Communications',
-      action: 'Route analytics payloads through mTLS tunnel and rotate certificates quarterly.',
-    },
-    {
-      title: 'Hardening Exported Components',
-      action: 'Enforce signature-level permissions for exposed receivers and services.',
-    },
-  ],
-  metrics: {
-    duration: '08m 12s',
-    severityScore: 7.4,
-    coverage: '92%',
-    riskLevel: 'High',
-  },
-}
 
 function App() {
   const [file, setFile] = useState<File | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedOptions, setSelectedOptions] = useState<string[]>(['mobsf'])
+  const [selectedOptions, setSelectedOptions] = useState<string[]>(['jadx'])
   const [step, setStep] = useState<WorkflowStep>('idle')
   const [progress, setProgress] = useState(0)
+  const [apkId, setApkId] = useState<string | null>(null)
+  const [currentTool, setCurrentTool] = useState<string | null>(null)
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatusType | null>(null)
+  const [apiConnected, setApiConnected] = useState<boolean>(false)
 
   const analysisReady = Boolean(file && selectedOptions.length)
 
+  // Check API health on mount and periodically
   useEffect(() => {
-    if (step !== 'processing') return
-    setProgress(0)
-    const timer = setInterval(() => {
-      setProgress((prev) => {
-        const next = Math.min(100, prev + Math.random() * 18)
-        if (next >= 100) {
-          clearInterval(timer)
-          setTimeout(() => setStep('summary'), 650)
+    const checkConnection = async () => {
+      try {
+        await checkHealth()
+        setApiConnected(true)
+      } catch (error) {
+        setApiConnected(false)
+        // Only log unexpected errors, not timeouts (which are expected when backend is offline)
+        if (error instanceof Error && !error.message.includes('timeout') && !error.message.includes('not reachable')) {
+          console.warn('Backend connection check failed:', error)
         }
-        return next
-      })
-    }, 650)
-    return () => clearInterval(timer)
-  }, [step])
+      }
+    }
 
-  const summaryData = useMemo(() => summaryTemplate, [])
+    checkConnection()
+    // Recheck every 10 seconds
+    const interval = setInterval(checkConnection, 10000)
+    return () => clearInterval(interval)
+  }, [])
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Poll analysis status when processing
+  useEffect(() => {
+    if (step !== 'processing' || !apkId) return
+
+    const pollStatus = async () => {
+      try {
+        const status = await getAnalysisStatus(apkId)
+        setAnalysisStatus(status)
+        setProgress(status.progress)
+        setCurrentTool(status.current_tool || null)
+
+        if (status.status === 'completed') {
+          setStep('summary')
+        } else if (status.status === 'failed') {
+          alert(`Analysis failed: ${status.error || 'Unknown error'}`)
+          setStep('idle')
+        }
+      } catch (error) {
+        console.error('Failed to poll status:', error)
+      }
+    }
+
+    const interval = setInterval(pollStatus, 2000)
+    pollStatus() // Initial poll
+
+    return () => clearInterval(interval)
+  }, [step, apkId])
+
+  const summaryData = useMemo(() => {
+    if (!analysisStatus?.results) {
+      return null
+    }
+
+    // Transform backend results into summary format
+    const results = analysisStatus.results
+    const findings: string[] = []
+    const vulnerabilities: any[] = []
+    const remediation: any[] = []
+
+    // Extract findings from tool results
+    if (results.quark?.threats && Array.isArray(results.quark.threats)) {
+      for (const threat of results.quark.threats) {
+        findings.push(threat.description || 'Threat detected by Quark Engine')
+        vulnerabilities.push({
+          category: 'Malware Pattern',
+          name: threat.rule || 'Suspicious behavior',
+          severity: results.quark.score > 70 ? 'high' : 'medium',
+          scanner: 'Quark Engine',
+        })
+      }
+    }
+
+    if (results.androguard && !results.androguard.error) {
+      findings.push('AndroGuard analysis completed - check manifest and permissions')
+    }
+
+    if (results.jadx && !results.jadx.error) {
+      findings.push('JADX decompilation successful - source code available for review')
+    }
+
+    if (results.apktool && !results.apktool.error) {
+      findings.push('APKTool decoding completed - resources and manifest extracted')
+    }
+
+    // Extract errors as vulnerabilities
+    for (const [tool, result] of Object.entries(results)) {
+      if (result && typeof result === 'object' && 'error' in result) {
+        vulnerabilities.push({
+          category: 'Tool Error',
+          name: `${tool}: ${result.error}`,
+          severity: 'medium',
+          scanner: tool,
+        })
+      }
+    }
+
+    return {
+      generatedAt: new Date().toLocaleString(),
+      keyFindings: findings,
+      vulnerabilities: vulnerabilities,
+      remediation: remediation,
+      metrics: {
+        duration: 'Calculating...',
+        severityScore: results.quark?.score || 0,
+        coverage: `${selectedOptions.length * 15}%`,
+        riskLevel: results.quark?.score > 70 ? 'High' : results.quark?.score > 40 ? 'Medium' : 'Low',
+      },
+    }
+  }, [analysisStatus, selectedOptions])
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.target.files?.[0]
     if (nextFile) {
       setFile(nextFile)
+      try {
+        const uploadResult = await uploadAPK(nextFile)
+        setApkId(uploadResult.apk_id)
+      } catch (error) {
+        console.error('Upload failed:', error)
+        const errorMessage = error instanceof Error ? error.message : 'Failed to upload APK'
+        alert(errorMessage)
+        // Clear file state on upload failure to maintain consistency
+        setFile(null)
+        setApkId(null)
+      }
     }
   }
 
   const toggleOption = (optionId: string) => {
-    if (optionId === 'mobsf') {
+    if (optionId === 'jadx') {
+      // JADX is recommended but not required
+      setSelectedOptions((prev) =>
+        prev.includes(optionId) ? prev.filter((id) => id !== optionId) : [...prev, optionId],
+      )
       return
     }
     setSelectedOptions((prev) =>
@@ -146,15 +216,26 @@ function App() {
     )
   }
 
-  const startAnalysis = () => {
-    if (!analysisReady) return
+  const handleStartAnalysis = async () => {
+    if (!analysisReady || !apkId) return
     setDialogOpen(false)
     setStep('processing')
+    setProgress(0)
+
+    try {
+      await startAnalysisAPI(apkId, selectedOptions)
+    } catch (error) {
+      console.error('Failed to start analysis:', error)
+      alert('Failed to start analysis. Make sure the backend is running.')
+      setStep('idle')
+    }
   }
 
   const resetWorkflow = () => {
     setProgress(0)
     setStep('idle')
+    setCurrentTool(null)
+    setAnalysisStatus(null)
   }
 
   return (
@@ -195,11 +276,30 @@ function App() {
           <header className="glass-panel rounded-3xl p-8 text-center lg:text-left">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-sm uppercase tracking-widest text-primary/70">Mobile Application Threads Simulation</p>
+                <div className="flex items-center gap-3">
+                  <p className="text-sm uppercase tracking-widest text-primary/70">Mobile Application Threads Simulation</p>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "h-2 w-2 rounded-full",
+                      apiConnected ? "bg-green-500" : "bg-red-500 animate-pulse"
+                    )} />
+                    <span className="text-xs text-muted-foreground">
+                      {apiConnected ? "Backend Connected" : "Backend Offline"}
+                    </span>
+                  </div>
+                </div>
                 <h1 className="mt-2 text-3xl font-semibold lg:text-4xl">Upload and Analyze Your APK</h1>
                 <p className="mt-3 text-base text-muted-foreground">
                   Combine static, dynamic, and runtime tooling in a single guided workflow powered by shadcn/ui.
                 </p>
+                {!apiConnected && (
+                  <div className="mt-3 rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-sm">
+                    <p className="text-red-400 font-medium">⚠️ Backend not connected</p>
+                    <p className="text-red-300/80 mt-1 text-xs">
+                      Start the backend: <code className="bg-black/30 px-1 rounded">python backend/main.py</code>
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <Button variant="outline" className="gap-2">
@@ -272,14 +372,18 @@ function App() {
                             <Checkbox
                               checked={selectedOptions.includes(option.id)}
                               onCheckedChange={() => toggleOption(option.id)}
-                              disabled={option.id === 'mobsf'}
                             />
                           </div>
                         ))}
                       </div>
-                      <Button className="mt-6 w-full" disabled={!analysisReady} onClick={startAnalysis}>
+                      <Button className="mt-6 w-full" disabled={!analysisReady} onClick={handleStartAnalysis}>
                         Run Analysis
                       </Button>
+                      {!apiConnected && (
+                        <p className="mt-2 text-xs text-muted-foreground text-center">
+                          ⚠️ Backend not connected. Start with: python backend/main.py
+                        </p>
+                      )}
                     </DialogContent>
                   </Dialog>
                   <Button variant="ghost" className="gap-2 text-muted-foreground">
@@ -297,20 +401,10 @@ function App() {
                   </Button>
                 </div>
                 <div className="space-y-4">
-                  {recentAnalyses.map((analysis) => (
-                    <div key={analysis.name} className="rounded-2xl border border-border/40 p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">{analysis.name}</p>
-                          <p className="text-xs text-muted-foreground">{analysis.date}</p>
-                        </div>
-                        <Badge variant={analysis.status === 'Failed' ? 'destructive' : 'success'}>{analysis.status}</Badge>
-                      </div>
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        Severity: <span className="font-semibold text-foreground">{analysis.severity}</span>
-                      </p>
-                    </div>
-                  ))}
+                  <div className="rounded-2xl border border-dashed border-border/40 p-6 text-center text-muted-foreground">
+                    <p className="text-sm">No recent analyses</p>
+                    <p className="text-xs mt-1">Upload and analyze an APK to see results here</p>
+                  </div>
                 </div>
                 <Separator className="my-2" />
                 <div className="rounded-2xl bg-gradient-to-br from-white/15 to-transparent p-4">
@@ -329,7 +423,7 @@ function App() {
               <div>
                 <p className="text-sm uppercase tracking-widest text-muted-foreground">Analysis Summary</p>
                 <h2 className="text-3xl font-semibold">{file ? `${file.name.replace('.apk', '')}.apk` : 'Your APK'}</h2>
-                <p className="text-sm text-muted-foreground">{summaryData.generatedAt}</p>
+                <p className="text-sm text-muted-foreground">{summaryData?.generatedAt || 'No analysis data available'}</p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <Button className="gap-2">
@@ -348,7 +442,7 @@ function App() {
                 Your results will appear here after the analysis completes. Select your scanners and run the workflow to
                 unlock findings, vulnerabilities, and remediation plans.
               </div>
-            ) : (
+            ) : summaryData ? (
               <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
                 <div className="space-y-6">
                   <Card className="glass-panel border-border/60">
@@ -360,12 +454,18 @@ function App() {
                       <CardDescription>Automated insights across static, dynamic, and runtime scans.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4 pt-4">
-                      {summaryData.keyFindings.map((finding) => (
-                        <div key={finding} className="flex items-start gap-4 rounded-2xl border border-border/50 p-4">
-                          <CheckCircle2 className="mt-1 h-5 w-5 text-primary" />
-                          <p className="text-sm text-muted-foreground">{finding}</p>
+                      {summaryData.keyFindings.length > 0 ? (
+                        summaryData.keyFindings.map((finding, idx) => (
+                          <div key={idx} className="flex items-start gap-4 rounded-2xl border border-border/50 p-4">
+                            <CheckCircle2 className="mt-1 h-5 w-5 text-primary" />
+                            <p className="text-sm text-muted-foreground">{finding}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-border/50 p-6 text-center text-muted-foreground">
+                          <p className="text-sm">No findings available</p>
                         </div>
-                      ))}
+                      )}
                     </CardContent>
                   </Card>
 
@@ -375,22 +475,28 @@ function App() {
                         <Shield className="h-5 w-5 text-primary" />
                         Vulnerabilities Found
                       </CardTitle>
-                      <CardDescription>Prioritized list merged from MobSF, Frida, and Drozer outputs.</CardDescription>
+                      <CardDescription>Prioritized list from analysis tool outputs.</CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-4 md:grid-cols-3">
-                      {summaryData.vulnerabilities.map((vuln) => (
-                        <div key={vuln.name} className="rounded-2xl border border-border/60 bg-secondary/30 p-4">
-                          <Badge
-                            variant={vuln.severity === 'critical' ? 'destructive' : vuln.severity === 'high' ? 'warning' : 'outline'}
-                            className="text-[11px]"
-                          >
-                            {vuln.severity.toUpperCase()}
-                          </Badge>
-                          <p className="mt-3 text-sm font-semibold text-foreground">{vuln.name}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{vuln.category}</p>
-                          <p className="mt-4 text-xs text-muted-foreground">Source · {vuln.scanner}</p>
+                      {summaryData.vulnerabilities.length > 0 ? (
+                        summaryData.vulnerabilities.map((vuln, idx) => (
+                          <div key={idx} className="rounded-2xl border border-border/60 bg-secondary/30 p-4">
+                            <Badge
+                              variant={vuln.severity === 'critical' ? 'destructive' : vuln.severity === 'high' ? 'warning' : 'outline'}
+                              className="text-[11px]"
+                            >
+                              {vuln.severity.toUpperCase()}
+                            </Badge>
+                            <p className="mt-3 text-sm font-semibold text-foreground">{vuln.name}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{vuln.category}</p>
+                            <p className="mt-4 text-xs text-muted-foreground">Source · {vuln.scanner}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-span-3 rounded-2xl border border-dashed border-border/60 p-6 text-center text-muted-foreground">
+                          <p className="text-sm">No vulnerabilities detected</p>
                         </div>
-                      ))}
+                      )}
                     </CardContent>
                   </Card>
 
@@ -403,12 +509,18 @@ function App() {
                       <CardDescription>Actionable next steps mapped to MATS knowledge base.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {summaryData.remediation.map((item) => (
-                        <div key={item.title} className="rounded-2xl border border-border/50 p-4">
-                          <p className="text-sm font-semibold">{item.title}</p>
-                          <p className="mt-2 text-sm text-muted-foreground">{item.action}</p>
+                      {summaryData.remediation.length > 0 ? (
+                        summaryData.remediation.map((item, idx) => (
+                          <div key={idx} className="rounded-2xl border border-border/50 p-4">
+                            <p className="text-sm font-semibold">{item.title}</p>
+                            <p className="mt-2 text-sm text-muted-foreground">{item.action}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-border/50 p-6 text-center text-muted-foreground">
+                          <p className="text-sm">No remediation suggestions available</p>
                         </div>
-                      ))}
+                      )}
                     </CardContent>
                   </Card>
                 </div>
@@ -423,7 +535,7 @@ function App() {
                       <div className="rounded-2xl border border-border/60 p-4 text-center">
                         <p className="text-sm text-muted-foreground">Severity Score</p>
                         <p className="mt-2 text-4xl font-semibold">{summaryData.metrics.severityScore}</p>
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">High risk</p>
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">{summaryData.metrics.riskLevel} risk</p>
                       </div>
                       <div className="space-y-3 text-sm">
                         <div className="flex justify-between text-muted-foreground">
@@ -441,8 +553,8 @@ function App() {
                       </div>
                       <Separator />
                       <div className="space-y-3">
-                        <p className="text-xs uppercase tracking-[0.35em] text-muted-foreground">MobSF stack</p>
-                        <Progress value={92} />
+                        <p className="text-xs uppercase tracking-[0.35em] text-muted-foreground">Analysis stack</p>
+                        <Progress value={Number.parseInt(summaryData.metrics.coverage, 10) || 0} />
                         <p className="text-xs text-muted-foreground">
                           Analyzer confidence improves as more baseline scans complete.
                         </p>
@@ -468,22 +580,34 @@ function App() {
                     <CardContent className="space-y-4">
                       <ScrollArea className="h-64 pr-2">
                         <div className="space-y-4 text-sm">
-                          {[
-                            'MobSF static scan completed · 02:12',
-                            'MITMProxy captured 38 sessions · 03:04',
-                            'Frida runtime scripts executed · 04:45',
-                            'Drozer exploit surface audit finished · 06:18',
-                            'PDF report assembled · 08:05',
-                          ].map((entry) => (
-                            <div key={entry} className="rounded-2xl border border-border/40 p-3 text-muted-foreground">
-                              {entry}
+                          {summaryData && analysisStatus?.results ? (
+                            Object.entries(analysisStatus.results).map(([tool, result]) => {
+                              if (result && typeof result === 'object' && 'status' in result) {
+                                const status = result.status === 'success' ? 'completed' : 'failed'
+                                const toolName = tool.charAt(0).toUpperCase() + tool.slice(1)
+                                return (
+                                  <div key={tool} className="rounded-2xl border border-border/40 p-3 text-muted-foreground">
+                                    {toolName} analysis {status}
+                                  </div>
+                                )
+                              }
+                              return null
+                            })
+                          ) : (
+                            <div className="rounded-2xl border border-dashed border-border/40 p-6 text-center text-muted-foreground">
+                              <p className="text-sm">No activity data available</p>
                             </div>
-                          ))}
+                          )}
                         </div>
                       </ScrollArea>
                     </CardContent>
                   </Card>
                 </div>
+              </div>
+            ) : (
+              <div className="rounded-3xl border border-dashed border-border/60 p-10 text-center text-muted-foreground">
+                <p className="text-base">Analysis completed but no results available</p>
+                <p className="text-sm mt-2">Check the backend logs for details</p>
               </div>
             )}
           </section>
@@ -496,7 +620,9 @@ function App() {
             <div className="flex flex-col items-center gap-3">
               <Activity className="h-8 w-8 text-primary" />
               <h3 className="text-2xl font-semibold">Analysis in Progress</h3>
-              <p className="text-sm text-muted-foreground">Analyzing threads… {Math.round(progress)}%</p>
+              <p className="text-sm text-muted-foreground">
+                {currentTool ? `Running ${currentTool}...` : 'Preparing analysis...'} {Math.round(progress)}%
+              </p>
             </div>
             <Progress value={progress} className="h-3" />
             <p className="text-xs text-muted-foreground">Tip: Regular analyses help identify bottlenecks early.</p>

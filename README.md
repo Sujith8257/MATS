@@ -1,138 +1,327 @@
 # MATS – Mobile Application Threads Simulation
 
-MATS is a web-based workflow (built with Vite + React + shadcn/ui) that lets security teams upload Android APKs, select multiple analysis engines (MobSF, MITMProxy, AndroGuard, Frida, Drozer), watch a guided execution flow, and review consolidated findings, vulnerabilities, remediation suggestions, and export-ready reports.
+MATS is a web-based workflow (built with Vite + React + shadcn/ui) that lets security teams upload Android APKs, select multiple analysis engines (JADX, APKTool, Quark Engine, AndroGuard, Frida, MITMProxy), watch a guided execution flow, and review consolidated findings, vulnerabilities, remediation suggestions, and export-ready reports.
 
-The current build focuses on a polished front-end experience with mocked data/state transitions so you can wire it up to real back-end services when ready.
-
----
-
-## 1. Prerequisites
-
-1. **Node.js 18+** – verify with `node -v`.  
-2. **npm 9+** – bundled with Node; confirm `npm -v`.  
-3. **Git** (optional but recommended) – for cloning/pulling updates.
-
-> _Tip:_ Enable Corepack (`corepack enable`) if you prefer pnpm/yarn; adapt the npm commands accordingly.
+The application includes a **Python backend** that orchestrates real analysis tools in a virtual environment, providing actual APK analysis capabilities.
 
 ---
 
-## 2. Getting the Source
+## 🚀 Quick Start (Windows)
 
-### Option A – Using Git
-```bash
-git clone <your-fork-or-repo-url> mats
-cd mats
+### Step 1: Prerequisites
+
+1. **Node.js 18+** – verify with `node -v`
+2. **Python 3.8+** – verify with `python --version`
+3. **Java Runtime** (for JADX/APKTool) – verify with `java -version`
+4. **Git** (optional but recommended)
+
+### Step 2: Automated Setup
+
+Run the Windows setup script:
+
+```powershell
+.\setup_windows.ps1
 ```
 
-### Option B – Downloading an Archive
-1. Download the ZIP from your source control provider.
-2. Extract it and open the folder in your terminal/IDE.
+This script will:
+- ✅ Check Python, Node.js, and Java
+- ✅ Create Python virtual environment
+- ✅ Install all Python dependencies
+- ✅ Download and configure analysis tools (JADX, APKTool)
+- ✅ Set up the backend API
 
----
+### Step 3: Manual Setup (Alternative)
 
-## 3. Install Dependencies
+If you prefer manual setup:
 
-From the project root:
 ```bash
+# Install Node.js dependencies
 npm install
-```
 
-This pulls Vite, React, shadcn/ui primitives, Radix UI, Tailwind, and supporting utilities (clsx, tailwind-merge, etc.).
+# Create Python virtual environment
+python -m venv venv
+venv\Scripts\activate
+
+# Install Python dependencies
+pip install -r backend/requirements.txt
+
+# Setup analysis tools
+python backend/tools_setup.py
+```
 
 ---
 
-## 4. Development Workflow
+## 🏃 Running the Application
 
-### 4.1 Start the Dev Server
+### Terminal 1: Start Backend API
+
+```bash
+# Activate virtual environment
+venv\Scripts\activate
+
+# Start FastAPI server
+python backend/main.py
+# Or: uvicorn backend.main:app --reload --port 8000
+```
+
+Backend will run at: `http://localhost:8000`
+
+### Terminal 2: Start Frontend
+
 ```bash
 npm run dev
 ```
-* Vite boots on `http://localhost:5173`.
-* Hot Module Replacement keeps UI changes instantaneous.
 
-### 4.2 Lint / Type-Check (optional during dev)
-```bash
-npm run build   # runs tsc then vite build; fails on TS errors
-```
-
-### 4.3 Stop the Server
-Press `Ctrl + C` in the terminal when you’re done.
+Frontend will run at: `http://localhost:5173`
 
 ---
 
-## 5. Production Build
+## 🛠️ Integrated Analysis Tools
 
-Generate optimized assets (tree-shaken JS + extracted CSS):
+| Tool | Windows Support | Status | Description |
+|------|----------------|--------|-------------|
+| **JADX** | ✅ Full | ⭐⭐⭐⭐⭐ | APK decompilation to Java/Kotlin |
+| **APKTool** | ✅ Full | ⭐⭐⭐⭐ | APK resource decoding and Smali |
+| **Quark Engine** | ✅ Full | ⭐⭐⭐⭐ | Malware detection and threat scoring |
+| **AndroGuard** | ⚠️ Partial | ⭐⭐⭐ | Deep bytecode and manifest analysis |
+| **Frida** | ✅ Full | ⭐⭐⭐⭐⭐ | Runtime instrumentation (requires device) |
+| **MITMProxy** | ✅ Full | ⭐⭐⭐⭐⭐ | Network traffic analysis (manual setup) |
+
+### Tool Installation Details
+
+#### Python Tools (Auto-installed)
 ```bash
-npm run build
+pip install mitmproxy androguard frida frida-tools quark-engine objection
 ```
 
-Preview the build locally:
-```bash
-npm run preview
-# Opens http://localhost:4173
-```
-
-Deploy the contents of `dist/` to your hosting provider (Netlify, Vercel, S3 + CloudFront, etc.).
+#### Java Tools (Auto-downloaded)
+- **JADX**: Downloaded to `tools/jadx/` (via `tools_setup.py`)
+- **APKTool**: Downloaded to `tools/apktool/` (via `tools_setup.py`)
 
 ---
 
-## 6. Project Structure
+## 📥 Manual JADX Installation (Alternative Methods)
+
+> **📖 For detailed installation instructions, see [JADX_INSTALLATION.md](JADX_INSTALLATION.md)**
+
+If the automated setup doesn't work or you prefer manual installation, here are platform-specific methods:
+
+### 🟦 Windows
+
+#### Method 1: Download EXE (Recommended - Easiest)
+1. Go to [JADX GitHub Releases](https://github.com/skylot/jadx/releases)
+2. Download `jadx-gui-x.y.z.zip` (latest version)
+3. Extract the ZIP file
+4. Run `jadx-gui.exe`
+
+#### Method 2: Install via Scoop (Best for developers)
+```powershell
+# Install Scoop (if not installed)
+Set-ExecutionPolicy RemoteSigned -scope CurrentUser
+iwr -useb get.scoop.sh | iex
+
+# Install JADX
+scoop install jadx
+
+# Run JADX
+jadx-gui
+```
+
+#### Requirements
+- **Java Runtime Environment (JRE)** or JDK
+  ```powershell
+  winget install Oracle.JavaRuntimeEnvironment
+  ```
+
+### 🟩 Linux (Ubuntu/Kali/Debian)
+
+#### Method 1: Install via Snap (Easiest)
+```bash
+sudo snap install jadx
+jadx-gui
+```
+
+#### Method 2: Manual Installation
+```bash
+# Download latest version from GitHub
+wget https://github.com/skylot/jadx/releases/download/v1.5.0/jadx-1.5.0.zip
+
+# Extract
+unzip jadx-1.5.0.zip
+cd jadx-1.5.0/bin
+
+# Run
+./jadx-gui
+```
+
+#### Requirements
+```bash
+sudo apt install default-jre
+```
+
+### 🟪 macOS
+
+#### Install via Homebrew
+```bash
+brew install jadx
+jadx-gui
+```
+
+### ✅ Verify Installation
+```bash
+jadx --version
+```
+
+---
+
+## 📁 Project Structure
 
 ```
 mats/
+├─ backend/
+│  ├─ main.py              # FastAPI backend server
+│  ├─ tools_setup.py       # Tool installation script
+│  ├─ requirements.txt    # Python dependencies
+│  └─ README.md            # Backend documentation
 ├─ src/
-│  ├─ App.tsx               # Main MATS screens + workflow state machine
-│  ├─ main.tsx              # React entry point
-│  ├─ index.css             # Tailwind layers + grayscale theme tokens
-│  ├─ components/
-│  │  └─ ui/                # shadcn-style primitives (button, card, dialog, etc.)
-│  └─ lib/utils.ts          # cn() helper
-├─ public/                  # Static assets (favicons, etc.)
-├─ index.html               # Vite root document
-├─ tailwind.config.js       # Tailwind + theme extensions
-├─ vite.config.ts           # Vite + React plugin + path aliases
-├─ tsconfig.json            # TS settings (strict + JSX + path aliases)
-└─ package.json             # Scripts + deps
+│  ├─ App.tsx              # Main React component
+│  ├─ lib/
+│  │  ├─ api.ts            # Backend API client
+│  │  └─ utils.ts          # Utility functions
+│  ├─ components/ui/      # shadcn/ui components
+│  └─ index.css            # Tailwind styles
+├─ tools/                   # Downloaded analysis tools
+├─ uploads/                 # Uploaded APK files
+├─ results/                 # Analysis results
+├─ venv/                    # Python virtual environment
+├─ setup_windows.ps1        # Windows setup script
+└─ package.json            # Node.js dependencies
 ```
 
 ---
 
-## 7. Using/Extending the UI
+## 🔌 API Endpoints
 
-1. **Upload Flow:** Selecting an APK triggers the analysis dialog. Currently, the file is kept client-side; connect the file picker to your API by sending it via `FormData`.
-2. **Analysis Options:** MobSF remains locked/required by default. Update `analysisOptions` in `src/App.tsx` to alter descriptions or add new engines.
-3. **Progress Simulation:** The `processing` state uses a timer to animate progress from 0–100%. Replace with websocket or polling to your backend.
-4. **Summary Data:** `summaryTemplate` mocks key findings, vulnerabilities, and remediation. Map this to real analyzer output once ready.
-5. **PDF/Share Buttons:** Buttons are placeholders; wire them to downloads or integrations (Jira, email, etc.).
+The backend provides the following endpoints:
 
----
-
-## 8. Styling Conventions
-
-* Tailwind is configured with a grayscale palette; adjust tokens in `src/index.css` for different themes.
-* Components inherit from shadcn/ui patterns, so you can generate more primitives with the CLI if needed.
-* Use the `.glass-panel` utility for frosted surfaces; it leverages the same border, blur, and shadow recipe across sections.
+- `GET /` - API information
+- `GET /health` - Health check and tool availability
+- `POST /upload` - Upload APK file
+- `POST /analyze` - Start analysis workflow
+- `GET /status/{apk_id}` - Get analysis status
+- `GET /results/{apk_id}` - Get analysis results
+- `GET /download/{apk_id}/{tool}` - Download tool-specific results
 
 ---
 
-## 9. Troubleshooting
+## 💻 Development Workflow
+
+### Frontend Development
+
+```bash
+npm run dev
+```
+
+- Vite boots on `http://localhost:5173`
+- Hot Module Replacement for instant updates
+
+### Backend Development
+
+```bash
+venv\Scripts\activate
+python backend/main.py
+```
+
+- FastAPI with auto-reload on code changes
+- API docs at `http://localhost:8000/docs`
+
+### Build for Production
+
+```bash
+# Frontend
+npm run build
+
+# Backend (no build needed, just deploy)
+# Deploy dist/ folder and backend/ folder
+```
+
+---
+
+## 🎨 Using the UI
+
+1. **Upload Flow**: Select an APK file → automatically uploads to backend
+2. **Analysis Options**: Choose tools (JADX recommended, others optional)
+3. **Progress Tracking**: Real-time status updates from backend
+4. **Results View**: Consolidated findings, vulnerabilities, and remediation suggestions
+5. **Export**: Download detailed reports (PDF export coming soon)
+
+---
+
+## ⚠️ Troubleshooting
 
 | Issue | Fix |
-| --- | --- |
-| `npm install` fails on Windows due to execution policy | Run PowerShell as admin: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
-| Tailwind classes not applying | Ensure `tailwind.config.js` `content` paths (`./index.html`, `./src/**/*.{ts,tsx}`) include any new directories |
-| Module path errors (`@/…`) | Confirm `tsconfig.json` and `vite.config.ts` both declare the `@` alias |
-| Build succeeds but UI shows blank | Check browser console; ensure `npm run build && npm run preview` shows no errors |
+|-------|-----|
+| `npm install` fails on Windows | Run PowerShell as admin: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
+| Backend not connecting | Ensure backend is running: `python backend/main.py` |
+| JADX/APKTool not found | Run `python backend/tools_setup.py` to download tools, or see [JADX_INSTALLATION.md](JADX_INSTALLATION.md) for manual installation |
+| Python tools fail to install | Install Microsoft C++ Build Tools: https://visualstudio.microsoft.com/visual-cpp-build-tools/ |
+| Java not found | Install via: `winget install Oracle.JavaRuntimeEnvironment` |
+| Port 8000 already in use | Change port in `backend/main.py` or kill existing process |
 
 ---
 
-## 10. Next Steps
+## 🔧 Configuration
 
-1. Connect the upload + analysis triggers to your backend (REST, GraphQL, or websockets).
-2. Replace mock `summaryTemplate` data with real responses and add error-handling states.
-3. Record analysis history in local storage or via API for persistence.
-4. Add auth/role-based access if needed for production use.
+### Environment Variables
 
-Happy testing! Let me know if you need scripts, deployment templates, or backend integration helpers.
+Create `.env` file in project root:
 
+```env
+VITE_API_URL=http://localhost:8000
+```
+
+### Backend Configuration
+
+Edit `backend/main.py` to:
+- Change port (default: 8000)
+- Adjust timeout values
+- Configure tool paths
+
+---
+
+## 📝 Next Steps
+
+1. ✅ Connect upload + analysis to backend (DONE)
+2. 🔄 Replace mock data with real backend responses (DONE)
+3. 📊 Add analysis history persistence
+4. 🔐 Add authentication/role-based access
+5. 📄 Implement PDF report generation
+6. 🐳 Docker containerization for easier deployment
+
+---
+
+## 📚 Additional Resources
+
+- [Backend API Documentation](backend/README.md)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [shadcn/ui Components](https://ui.shadcn.com/)
+- [Vite Documentation](https://vite.dev/)
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+---
+
+## 📄 License
+
+This project is open source and available for use.
+
+---
+
+**Happy testing!** 🚀
